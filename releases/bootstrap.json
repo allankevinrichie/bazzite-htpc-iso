@@ -1,4 +1,5 @@
 {
   "run_id": "45574701965",
-  "expected_sha": "8ce2ed2c548be77d35254108e5a331496ed1088f"
+  "expected_sha": "8ce2ed2c548be77d35254108e5a331496ed1088f",
+  "format": "zip-store"
 }

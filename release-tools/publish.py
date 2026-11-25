@@ -15,8 +15,9 @@ TOOLS = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("join_iso", TOOLS / "join-iso.py")
 join_iso = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(join_iso)
-ISO, BUF = join_iso.ISO, join_iso.BUF
-PART_BYTES = 1900 * 1024 * 1024
+ISO = join_iso.ISO
+ZIP = "bazzite-htpc-amd64.zip"
+ZIP_LIMIT = "1900m"
 
 
 def check(condition, message):
@@ -24,32 +25,48 @@ def check(condition, message):
         raise SystemExit(message)
 
 
-def split(source, dest, limit=PART_BYTES):
+def package_zip(source, dest, split_limit=ZIP_LIMIT):
     expected, _ = join_iso.sha_line(
         (source / "SHA256SUMS").read_text().strip(), lambda name: name == ISO)
-    full = hashlib.sha256()
-    index, entries = 0, []
-    with (source / ISO).open("rb") as inp:
-        while first := inp.read(min(limit, BUF)):
-            index += 1
-            check(index <= 96, "Too many ISO parts")
-            part = dest / f"{ISO}.part{index:03d}"
-            h, remaining = hashlib.sha256(), limit
-            with part.open("xb") as out:
-                block = first
-                while block:
-                    out.write(block)
-                    h.update(block)
-                    full.update(block)
-                    remaining -= len(block)
-                    block = inp.read(min(BUF, remaining)) if remaining else b""
-            entries.append(f"{h.hexdigest()}  {part.name}\n")
-    check(index and full.hexdigest() == expected, "Source ISO SHA-256 mismatch")
-    (dest / "PARTS.sha256").write_text("".join(entries))
-    for filename in ("SHA256SUMS", "build-info.txt"):
-        shutil.copyfile(source / filename, dest / filename)
-    shutil.copyfile(TOOLS / "join-iso.py", dest / "join-iso.py")
-    return index
+    members = [ISO, "SHA256SUMS", "build-info.txt"]
+    # Stable bytes across retries (including ZIP metadata).
+    for name in members:
+        os.utime(source / name, (946684800, 946684800))
+    env = dict(os.environ, TZ="UTC")
+    env.pop("ZIPOPT", None)
+    archive = dest / ZIP
+    subprocess.run(["zip", "-q", "-0", "-X", "-s", split_limit,
+                    str(archive), *members], cwd=source, env=env, check=True)
+    # Use an independent split-ZIP reader. Some Info-ZIP versions can
+    # create spans but truncate an entry when converting back to one file.
+    seven_zip = shutil.which("7zz") or shutil.which("7z")
+    check(seven_zip, "A split-ZIP capable 7-Zip executable is required")
+    listing = subprocess.check_output(
+        [seven_zip, "l", "-slt", "--", str(archive)], env=env, text=True)
+    reports = listing.split("----------", 1)
+    check(len(reports) == 2, "Missing ZIP member listing")
+    fields = reports[1].splitlines()
+    check(sorted(line[7:] for line in fields if line.startswith("Path = ")) == sorted(members),
+          "Unexpected ZIP members")
+    check([line[9:] for line in fields if line.startswith("Method = ")] ==
+          ["Store"] * len(members), "ZIP members must use Store")
+    for name in members[1:]:
+        data = subprocess.check_output([seven_zip, "x", "-so", "-bd", str(archive), name], env=env)
+        check(data == (source / name).read_bytes(), f"Archive changes metadata: {name}")
+    args = [seven_zip, "x", "-so", "-bd", str(archive), ISO]
+    with subprocess.Popen(args, stdout=subprocess.PIPE, env=env) as p:
+        digest = hashlib.file_digest(p.stdout, "sha256").hexdigest()
+        check(p.wait() == 0 and digest == expected,
+              "ISO in split ZIP does not match source SHA-256")
+    volumes = {x.name for x in dest.iterdir()}
+    count = len(volumes)
+    prefix = ZIP.removesuffix(".zip")
+    check(1 <= count <= 97 and volumes == (
+        {ZIP} | {f"{prefix}.z{i:02d}" for i in range(1, count)}),
+        "Unexpected split ZIP output")
+    shutil.copyfile(source / "SHA256SUMS", dest / "SHA256SUMS")
+    print(f"Verified {count} ZIP volume(s), Store mode, source ISO SHA-256 {expected}", flush=True)
+    return count
 
 
 def gh(*args):
@@ -98,33 +115,56 @@ def main():
     artifact = [x for x in json.loads(gh("api", f"{base}/actions/runs/{run_id}/artifacts",
                                         "--jq", ".artifacts"))
                 if x["name"] == "bazzite-htpc-amd64" and not x["expired"]]
-    check(len(artifact) == 1, "Expected one unexpired ISO artifact")
-    tag = f"iso-run-{run_id}"
+    check(len(artifact) <= 1, "More than one unexpired ISO artifact")
+    source_marker = f"Source: https://github.com/{repo}/actions/runs/{run_id} (commit `{sha}`)."
+    legacy_tag = f"iso-run-{run_id}"
+    tag = legacy_tag + "-zip"
+    legacy = None
+    if not artifact:
+        # Backfill the same build after the temporary artifact expires. Only
+        # accept the previous verified, public same-repo promotion of this run.
+        legacy = json.loads(gh("api", f"{base}/releases/tags/{legacy_tag}"))
+        ref = json.loads(gh("api", f"{base}/git/ref/tags/{legacy_tag}"))
+        check(not legacy["draft"] and legacy["prerelease"]
+              and source_marker in (legacy.get("body") or "")
+              and ref["object"]["type"] == "commit" and ref["object"]["sha"] == sha,
+              "Legacy release does not match source build")
+        parts_pattern = re.compile(re.escape(ISO) + r"\.part[0-9]{3}")
+        data_size = sum(a["size"] for a in legacy["assets"] if parts_pattern.fullmatch(a["name"]))
+        check(data_size > 0, "Legacy release has no ISO parts")
+    else:
+        data_size = artifact[0]["size_in_bytes"]
     with tempfile.TemporaryDirectory(prefix="bazzite-release-") as work:
         root = Path(work)
-        check(shutil.disk_usage(root).free > 3 * artifact[0]["size_in_bytes"] + (1 << 30),
+        check(shutil.disk_usage(root).free > 4 * data_size + (1 << 30),
               "Not enough runner space to download and split the ISO")
         source, parts = root / "source", root / "parts"
         source.mkdir()
         parts.mkdir()
-        gh("run", "download", run_id, "--repo", repo, "--name", "bazzite-htpc-amd64",
-           "--dir", str(source))
+        if legacy:
+            gh("release", "download", legacy_tag, "--repo", repo, "--dir", str(source),
+               "--pattern", ISO + ".part[0-9][0-9][0-9]",
+               "--pattern", "SHA256SUMS", "--pattern", "PARTS.sha256",
+               "--pattern", "build-info.txt")
+            join_iso.join(source)
+        else:
+            gh("run", "download", run_id, "--repo", repo, "--name", "bazzite-htpc-amd64",
+               "--dir", str(source))
         check(f"commit={sha}" in (source / "build-info.txt").read_text().splitlines(),
               "Artifact build-info does not identify the expected commit")
-        count = split(source, parts)
+        count = package_zip(source, parts)
         notes = root / "release-notes.md"
         notes.write_text(
             f"# 实验版 / Experimental ISO\n\n"
             f"Source: https://github.com/{repo}/actions/runs/{run_id} (commit `{sha}`).\n\n"
-            f"下载全部 {count} 个 `.iso.partNNN`，以及 `SHA256SUMS`、`PARTS.sha256`、"
-            f"`join-iso.py`，放进同一目录（Windows 建议 NTFS）。运行 "
-            f"`py -3 join-iso.py`（Windows）或 `python3 join-iso.py`（Linux/macOS）。"
-            f"脚本逐卷及整盘校验，成功后输出 `{ISO}`。需为分卷和合并后的 ISO 预留约 20 GB。\n\n"
+            f"下载全部 {count} 个 ZIP 文件（最后一卷 `{ZIP}`，其余为 `.z01`、"
+            "`.z02` 等），放在同一目录，不改名。用支持分卷 ZIP64 的解压工具（如 WinZip）打开"
+            f"末卷 `{ZIP}`，解出 `{ISO}`。ZIP 仅归档，不压缩，不需要 Python。"
+            "预留约 20 GB 空间，用归档内或单独附上的 `SHA256SUMS` 校验 ISO。\n\n"
             "尚未验证安装和首次启动。只在带空白虚拟磁盘的 UEFI 虚拟机里先断网试装，"
             "不要直接覆盖现有系统。This is not an official Bazzite release.\n",
             encoding="utf-8")
-        title = f"Bazzite HTPC Live ISO (run {run_id})"
-        source_marker = f"Source: https://github.com/{repo}/actions/runs/{run_id} (commit `{sha}`)."
+        title = f"Bazzite HTPC Live ISO (ZIP Store, run {run_id})"
 
         def tag_refs():
             return [x for x in json.loads(gh("api", f"{base}/git/matching-refs/tags/{tag}"))

@@ -11,9 +11,11 @@
 
 ## 长期下载
 
-从 [GitHub Releases](https://github.com/allankevinrichie/bazzite-htpc-iso/releases) 下载指定实验版本的全部 `.iso.partNNN`、`PARTS.sha256`、`SHA256SUMS` 和 `join-iso.py` 到同一目录。Windows（建议 NTFS）运行 `py -3 join-iso.py`，Linux/macOS 运行 `python3 join-iso.py`。脚本校验每一卷及重组后的完整 ISO，不覆盖现有 ISO。预留约 20 GB。
+从 [GitHub Releases](https://github.com/allankevinrichie/bazzite-htpc-iso/releases) 选择标题含 **ZIP Store** 的实验版。下载所有 `.z01`、`.z02` 等分卷和最后一卷 `bazzite-htpc-amd64.zip` 到同一个目录，不要改名。Windows 用支持分卷 ZIP64 的工具（如 [WinZip](https://kb.winzip.com/hc/en-us/articles/55548955265812-Splitting-Zip-files)）打开最后的 `.zip` 解出 ISO。无需 Python。Windows 文件资源管理器的内置解压不作为此格式的支持路径。可用 `Get-FileHash .\bazzite-htpc-amd64.iso -Algorithm SHA256` 与 `SHA256SUMS` 对照。留约 20 GB 空间给分卷和 ISO。
 
-后续要长期保留某次构建时，在它的 Artifact 到期前，手动运行 **Publish Bazzite ISO pre-release**，填该次成功的主分支 Build run ID 和完整提交 SHA。发布任务只从受控构建取镜像，校验后按 1900 MiB 分卷，确认全部上传再公开为预发布版本，不影响普通构建。
+Linux 可用新版 7-Zip 的 `7z x bazzite-htpc-amd64.zip`（可执行文件也可能叫 `7zz`），再执行 `sha256sum -c SHA256SUMS`。先前的裸分卷实验版仍可下载，不受影响。
+
+后续要长期保留某次构建时，在 Artifact 到期前手动运行 **Publish Bazzite ISO pre-release**，填成功的主分支 Build run ID 和完整提交 SHA。发布任务验证来源、以 Store 模式写标准 ZIP 分卷（每卷最多 1900 MiB），再重读 ISO 核对 SHA-256，确认全部上传后公开预发布版本，不影响普通构建。
 
 ## 改什么
 
