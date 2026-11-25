@@ -1,0 +1,37 @@
+name: Publish Bazzite ISO pre-release
+on:
+  push:
+    branches: [main]
+    paths: ['releases/bootstrap.json']
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful Build Bazzite HTPC ISO run ID on main
+        required: true
+        type: string
+      source_commit:
+        description: Full 40-character commit SHA of the source build
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: publish-bazzite-iso
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Promote verified ISO to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: python3 release-tools/publish.py

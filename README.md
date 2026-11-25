@@ -4,10 +4,16 @@
 
 ## 构建和下载
 
-- GitHub：Actions → **Build Bazzite HTPC ISO** → **Run workflow**。对 main 的构建相关文件变更也会自动构建。成功后展开该次运行底部的 Artifacts，下载 **bazzite-htpc-amd64**。工作流不创建公开 Release，不发布 GHCR 容器，产物保留 2 天。
+- GitHub：Actions → **Build Bazzite HTPC ISO** → **Run workflow**。对 main 的构建相关文件变更也会自动构建。成功后展开该次运行底部的 Artifacts，下载 **bazzite-htpc-amd64**。临时 Artifact 保留 2 天，不发布 GHCR 容器。
 - 解压后执行 `sha256sum -c SHA256SUMS`（Windows 可用 `Get-FileHash .\bazzite-htpc-amd64.iso -Algorithm SHA256` 与 SHA256SUMS 对照）。`build-info.txt` 记录Deck 和桌面底座摘要、嵌入镜像 ID、安装器和构建器提交。
 - 本地：在有 rootful Podman、联网且有足够磁盘空间的 **x86-64 Linux** 上运行 `./scripts/build-iso.sh`。脚本工作目录是仓库，仅产生本机 OCI 镜像和 ISO；不会访问目标机磁盘。可用 `BASE_IMAGE`、`LIVE_BASE_IMAGE` 固定两个同发行版本的底座摘要；临时空间可用 `HTPC_BUILD_TMPDIR` 指定。需要 sudo、Podman、Git、Python 3 和能进行嵌套镜像构建的 Linux 环境。
 - 如果私有仓库的 Actions 分钟、Artifact 存储或托管 runner 空间不足，不必开通付费：可以在本地 Linux 构建。没有把标准 runner 可用空间或账号额度当成保证。
+
+## 长期下载
+
+从 [GitHub Releases](https://github.com/allankevinrichie/bazzite-htpc-iso/releases) 下载指定实验版本的全部 `.iso.partNNN`、`PARTS.sha256`、`SHA256SUMS` 和 `join-iso.py` 到同一目录。Windows（建议 NTFS）运行 `py -3 join-iso.py`，Linux/macOS 运行 `python3 join-iso.py`。脚本校验每一卷及重组后的完整 ISO，不覆盖现有 ISO。预留约 20 GB。
+
+后续要长期保留某次构建时，在它的 Artifact 到期前，手动运行 **Publish Bazzite ISO pre-release**，填该次成功的主分支 Build run ID 和完整提交 SHA。发布任务只从受控构建取镜像，校验后按 1900 MiB 分卷，确认全部上传再公开为预发布版本，不影响普通构建。
 
 ## 改什么
 
