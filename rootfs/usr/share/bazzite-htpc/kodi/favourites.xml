@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<favourites>
+  <favourite name="01 · Install Arctic Zephyr Reloaded">InstallAddon(skin.arctic.zephyr.mod)</favourite>
+  <favourite name="02 · Install Simplified Chinese">InstallAddon(resource.language.zh_cn)</favourite>
+</favourites>

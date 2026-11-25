@@ -1,0 +1,9 @@
+[Unit]
+Description=Install Bazzite HTPC Flatpaks
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/bazzite-htpc-flatpaks
+TimeoutStartSec=20min

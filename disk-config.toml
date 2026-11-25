@@ -1,0 +1,3 @@
+[customizations.iso]
+volume_id = "BAZZITE-HTPC"
+# Keep disk selection interactive. Do not add clearpart or unattended partitioning.

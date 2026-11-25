@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<keymap>
+  <FullscreenVideo>
+    <joystick profile="game.controller.default">
+      <a>Pause</a>
+      <b>Back</b>
+      <x>OSD</x>
+      <y>NextSubtitle</y>
+    </joystick>
+  </FullscreenVideo>
+</keymap>

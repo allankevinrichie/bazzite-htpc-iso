@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+set -euo pipefail
+list=/usr/share/bazzite-htpc/flatpaks.list
+state=/var/lib/bazzite-htpc
+fingerprint=$(sha256sum "$list")
+marker="$state/flatpaks.sha256"
+if [[ -r "$marker" && $(cat "$marker") == "$fingerprint" ]]; then exit 0; fi
+mapfile -t apps < <(grep -Ev '^[[:space:]]*(#|$)' "$list")
+if (("${#apps[@]}")); then
+  flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+  for app in "${apps[@]}"; do
+    if ! flatpak info --system "$app" >/dev/null 2>&1; then
+      flatpak install --system --noninteractive -y flathub "$app"
+    fi
+  done
+fi
+install -d -m 0755 "$state"
+printf '%s\n' "$fingerprint" > "$marker.tmp"
+mv -f -- "$marker.tmp" "$marker"

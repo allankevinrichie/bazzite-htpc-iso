@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry Bazzite HTPC Flatpak setup when needed
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=15min
+Unit=bazzite-htpc-flatpaks.service
+
+[Install]
+WantedBy=timers.target

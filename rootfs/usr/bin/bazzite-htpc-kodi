@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+set -euo pipefail
+if ! flatpak info tv.kodi.Kodi >/dev/null 2>&1; then
+  echo 'Kodi is not yet installed; see journalctl -u bazzite-htpc-flatpaks.service -b.' >&2
+  exit 1
+fi
+data="$HOME/.var/app/tv.kodi.Kodi/data"
+profile="$data/userdata"
+seed=/usr/share/bazzite-htpc/kodi
+mkdir -p -- "$profile"
+# Serialize only our setup; do not touch a pre-existing or restored Kodi profile.
+(
+  flock -x 9
+  if [[ ! -e "$profile/guisettings.xml" && ! -e "$profile/.bazzite-htpc-seeded" ]]; then
+    # An existing profile can have media sources even if guisettings.xml was removed.
+    if [[ ! -e "$profile/sources.xml" && ! -d "$profile/Database" ]]; then
+      for f in guisettings.xml favourites.xml keymaps/htpc-joystick.xml \
+        addon_data/metadata.themoviedb.org.python/settings.xml \
+        addon_data/metadata.tvshows.themoviedb.org.python/settings.xml; do
+        mkdir -p -- "$(dirname -- "$profile/$f")"
+        cp -n -- "$seed/$f" "$profile/$f"
+      done
+      # Place the CJK font inside the Kodi sandbox; the installed system font
+      # alone does not necessarily appear in Kodi's subtitle-font list.
+      fc=$(fc-match -f '%{family}|%{file}' 'Noto Sans SC:style=Regular' || true)
+      font=${fc#*|}
+      case "${fc%%|*}:$font" in
+        *'Noto Sans SC'*:*.otf|*'Noto Sans CJK SC'*:*.ttf)
+          mkdir -p -- "$data/media/fonts"
+          cp -n -- "$font" "$data/media/fonts/"
+          ;;
+        *) echo 'Noto Sans SC font was not found; check Kodi subtitle fonts manually.' >&2 ;;
+      esac
+      : > "$profile/.bazzite-htpc-seeded"
+    fi
+  fi
+) 9>"$data/.htpc-seed.lock"
+exec flatpak run tv.kodi.Kodi "$@"

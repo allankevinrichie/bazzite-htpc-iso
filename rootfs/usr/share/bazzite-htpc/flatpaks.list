@@ -1,0 +1,4 @@
+# Installed on first successful networked boot, not embedded in the ISO.
+com.moonlight_stream.Moonlight
+io.github.streetpea.Chiaki4deck
+tv.kodi.Kodi

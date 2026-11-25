@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Kodi · HTPC
+Name[zh_CN]=Kodi · 客厅片库
+Exec=/usr/bin/bazzite-htpc-kodi
+Icon=tv.kodi.Kodi
+Terminal=false
+Categories=AudioVideo;Video;Player;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings version="2">
+  <setting id="lookandfeel.skin">skin.estuary</setting>
+  <setting id="lookandfeel.font">Arial</setting>
+  <setting id="locale.audiolanguage">original</setting>
+  <setting id="locale.subtitlelanguage">Chinese</setting>
+  <setting id="subtitles.fontname">Noto Sans SC</setting>
+  <setting id="subtitles.fontsize">42</setting>
+  <setting id="subtitles.colorpick">FFFFFFFF</setting>
+  <setting id="subtitles.bordersize">25</setting>
+  <setting id="scrapers.moviesdefault">metadata.themoviedb.org.python</setting>
+  <setting id="scrapers.tvshowsdefault">metadata.tvshows.themoviedb.org.python</setting>
+  <setting id="videolibrary.updateonstartup">false</setting>
+</settings>
