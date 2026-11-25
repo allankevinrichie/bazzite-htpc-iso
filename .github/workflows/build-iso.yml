@@ -4,7 +4,6 @@ on:
     branches: [main]
     paths:
       - Containerfile
-      - disk-config.toml
       - 'rootfs/**'
       - 'scripts/**'
       - '.github/workflows/build-iso.yml'
@@ -26,7 +25,23 @@ jobs:
         uses: ublue-os/remove-unwanted-software@695eb75bc387dbcd9685a8e72d23439d8686cba6
         with:
           remove-codeql: true
-      - name: Build and verify checksum
+      - name: Prepare disposable runner storage
+        shell: bash
+        run: |
+          if ! command -v mkfs.btrfs >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y btrfs-progs
+          fi
+          sudo truncate -s 110G /mnt/htpc-podman.img
+          sudo mkfs.btrfs -f -m single -d single /mnt/htpc-podman.img
+          sudo mkdir -p /mnt/htpc-podman
+          sudo mount -o loop,compress-force=zstd:2,noatime /mnt/htpc-podman.img /mnt/htpc-podman
+          sudo mkdir -p /mnt/htpc-podman/storage /mnt/htpc-podman/tmp /var/lib/containers/storage
+          sudo chown "$(id -u):$(id -g)" /mnt/htpc-podman/tmp
+          sudo mount --bind /mnt/htpc-podman/storage /var/lib/containers/storage
+          echo 'HTPC_BUILD_TMPDIR=/mnt/htpc-podman/tmp' >> "$GITHUB_ENV"
+
+      - name: Build embedded image and Live ISO
         run: |
           df -h .
           ./scripts/build-iso.sh
