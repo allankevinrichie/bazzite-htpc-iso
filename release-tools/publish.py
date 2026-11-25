@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from urllib.parse import quote
 
 
 TOOLS = Path(__file__).resolve().parent
@@ -53,6 +54,25 @@ def split(source, dest, limit=PART_BYTES):
 
 def gh(*args):
     return subprocess.check_output(["gh", *args], text=True).strip()
+
+
+def api_json(method, path, data):
+    return json.loads(subprocess.check_output(
+        ["gh", "api", "-X", method, path, "--input", "-"],
+        input=json.dumps(data), text=True))
+
+
+def upload(repo, release_id, path):
+    # curl --upload-file streams rather than loading a 1900 MiB part into RAM.
+    token = os.environ["GH_TOKEN"]
+    check(re.fullmatch(r"[A-Za-z0-9_.-]+", token), "Unexpected GitHub token format")
+    url = (f"https://uploads.github.com/repos/{repo}/releases/{release_id}/assets"
+           f"?name={quote(path.name, safe='')}")
+    return json.loads(subprocess.check_output(
+        ["curl", "--silent", "--show-error", "--fail-with-body", "--request", "POST",
+         "--header", "Content-Type: application/octet-stream", "--config", "-",
+         "--upload-file", str(path), "--url", url],
+        input=f'header = "Authorization: Bearer {token}"\n', text=True))
 
 
 def main():
@@ -103,21 +123,33 @@ def main():
             "尚未验证安装和首次启动。只在带空白虚拟磁盘的 UEFI 虚拟机里先断网试装，"
             "不要直接覆盖现有系统。This is not an official Bazzite release.\n",
             encoding="utf-8")
-        releases = [json.loads(x) for x in gh("api", "--paginate", f"{base}/releases",
-                    "--jq", f'.[] | select(.tag_name == "{tag}") | @json').splitlines()]
-        check(len(releases) < 2, "Multiple releases for this tag")
-        if not releases:
-            refs = json.loads(gh("api", f"{base}/git/matching-refs/tags/{tag}"))
-            check(not any(x["ref"] == f"refs/tags/{tag}" for x in refs),
-                  "A tag already exists without the matching release")
-            gh("release", "create", tag, "--repo", repo, "--target", sha, "--draft",
-               "--prerelease", "--latest=false", "--title", f"Bazzite HTPC Live ISO (run {run_id})",
-               "--notes-file", str(notes))
-            releases = [json.loads(x) for x in gh("api", "--paginate", f"{base}/releases",
-                        "--jq", f'.[] | select(.tag_name == "{tag}") | @json').splitlines()]
-        check(len(releases) == 1 and releases[0]["target_commitish"] == sha
-              and releases[0]["prerelease"], "Release does not match source build")
-        release = releases[0]
+        title = f"Bazzite HTPC Live ISO (run {run_id})"
+        source_marker = f"Source: https://github.com/{repo}/actions/runs/{run_id} (commit `{sha}`)."
+
+        def tag_refs():
+            return [x for x in json.loads(gh("api", f"{base}/git/matching-refs/tags/{tag}"))
+                    if x["ref"] == f"refs/tags/{tag}"]
+
+        pages = json.loads(gh("api", "--paginate", "--slurp", f"{base}/releases?per_page=100"))
+        releases = [x for page in pages for x in page
+                    if x["tag_name"] == tag or (x["draft"] and x["name"] == title)]
+        check(len(releases) < 2, "Multiple releases or drafts match this run")
+        if releases:
+            release = releases[0]
+        else:
+            check(not tag_refs(), "A tag already exists without the matching release")
+            release = api_json("POST", f"{base}/releases", {
+                "tag_name": tag, "target_commitish": sha, "name": title,
+                "body": notes.read_text(encoding="utf-8"), "draft": True,
+                "prerelease": True, "make_latest": "false",
+            })
+        print(f"Matched release ID {release['id']}, tag={release['tag_name']!r}, "
+              f"draft={release['draft']}, target={release['target_commitish']!r}", flush=True)
+        check(release["name"] == title and source_marker in (release.get("body") or "")
+              and (release["tag_name"] == tag or
+                   release["draft"] and (not release["tag_name"] or
+                                          release["tag_name"].startswith("untagged-"))),
+              "Release does not match source build")
         release_id = release["id"]
 
         def assets():
@@ -143,15 +175,21 @@ def main():
             check(release["draft"], "Published release is incomplete; not modifying it")
             for name in missing:
                 print(f"Uploading {name}", flush=True)
-                gh("release", "upload", tag, "--repo", repo, str(files[name]))
+                uploaded = upload(repo, release_id, files[name])
+                check(uploaded["name"] == name and matches(name, uploaded),
+                      f"Upload metadata does not verify: {name}")
         remote = assets()
         check(set(remote) == set(files) and all(matches(n, a) for n, a in remote.items()),
               "Uploaded release sizes or digests do not match; leaving draft unpublished")
+        refs = tag_refs()
+        check(all(x["object"]["type"] == "commit" and x["object"]["sha"] == sha
+                  for x in refs), "Tag does not match source commit")
         if release["draft"]:
-            refs = json.loads(gh("api", f"{base}/git/matching-refs/tags/{tag}"))
-            check(all(x["object"]["sha"] == sha for x in refs if x["ref"] == f"refs/tags/{tag}"),
-                  "Tag does not match source commit; leaving draft unpublished")
-            gh("release", "edit", tag, "--repo", repo, "--draft=false", "--latest=false")
+            if not refs:
+                api_json("POST", f"{base}/git/refs", {"ref": f"refs/tags/{tag}", "sha": sha})
+            api_json("PATCH", f"{base}/releases/{release_id}", {
+                "tag_name": tag, "draft": False, "prerelease": True, "make_latest": "false",
+            })
         published = json.loads(gh("api", f"{base}/releases/{release_id}"))
         ref = json.loads(gh("api", f"{base}/git/ref/tags/{tag}"))
         check(not published["draft"] and published["prerelease"] and ref["object"]["sha"] == sha,
